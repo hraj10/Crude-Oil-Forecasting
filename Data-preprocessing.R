@@ -7,13 +7,9 @@ library(readxl)
 # Dependent variable: Spot Crude Oil Price: West Texas Intermediate (WTI) (WTISPLC)
 # Available under https://fred.stlouisfed.org/series/WTISPLC
 
-#data<-read.csv("data/MCOILWTICO.csv")
 data<-read.csv("data/MCOILWTICO FINAL.csv")[-(397:402),]
 inflation<-read.csv("data/CPIAUCSL.csv")[-(913:917),]
 kilian_data<-as.data.frame(read_xlsx("data/kilian.xlsx")[-(661:666),])
-#fred<-read.csv("data/2023-04.csv")
-futures_data<-read_xls("data/RCLC1d.xls",col_names = FALSE)
-futures<-futures_data$...6[4:480]
 stock_change<-as.data.frame(read_xlsx("data/Stock change.xlsx",col_names = FALSE))[-(253:257),]
 production<-as.data.frame(read_xlsx("data/Global Production.xlsx",col_names = FALSE)[-(253:257),])
 
@@ -82,13 +78,7 @@ kilian_lag1<-Data_Select_Period(kilian_idx,"diff", end=c(2022,12))
 kilian_lag3<-Data_Select_Period(kilian_data[-c((dim(kilian_data)[1]-2):dim(kilian_data)[1]),],"diff",end=c(2022,12))
 kilian_lag6<-Data_Select_Period(kilian_data[-c((dim(kilian_data)[1]-5):dim(kilian_data)[1]),],"diff",end=c(2022,12))
 kilian_lag12<-Data_Select_Period(kilian_data[-c((dim(kilian_data)[1]-11):dim(kilian_data)[1]),],"diff",end=c(2022,12))
-# Industrial production index instead of ISM
-#fred_lag1<-(fred[c(-1,-dim(fred)[1]),])
-#indpro_lag1<-Data_Select_Period(cbind(as.double(fred_lag1$RPI),as.double(fred_lag1$INDPRO)),transform = "logReturn",end=c(2023,04))
 
-# Futures price
-#nymex_data<-futures
-#nymex<-Data_Select_Period(cbind(nymex_data,nymex_data),transform = "logReturn",end=c(2022,12))
 
 # Stock change
 delta_stock<-Data_Select_Period(stock_change,end=c(2022,12))/1000
