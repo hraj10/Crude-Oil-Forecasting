@@ -1,0 +1,1199 @@
+---
+title: "main"
+author: "Rick Holubec"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+# Set paths and get packages
+
+```{r}
+rm(list = ls())
+#path = '~/Documents/LSE/Dissertation/Code/ANOVA-kernel/'
+#path_stan = '~/Documents/LSE/Dissertation/Code/Additive-GP-Kronecker-main/Code/Stan/'
+library(ggplot2)
+library(plyr)
+library(cmdstanr)
+library(rstan)
+```
+
+# Import data
+
+```{r}
+source("Data-preprocessing.R")
+X_ts<-cbind(y_lag1,y_lag2,y_lag12, cpi, kilian, delta_stock, prod)
+X<-as.data.frame(X_ts)
+X_lag1_ts<-cbind(y_lag1, cpi_lag1, kilian_lag1, delta_stock_lag1, prod_lag1)
+X_lag1<-as.data.frame(X_ts)
+y<-as.vector(y_ts)
+# Plots
+ts.plot(y)
+print(adf.test(y))
+print(jarque.bera.test(y))
+print(bds.test(y))
+hist((y), prob = TRUE,100)
+xay<-seq(mean(y)-10*sd(y),mean(y)+10*sd(y),0.0001)
+lines(xay,dnorm(xay,mean = mean(y),sd = sd(y)), col="red")
+## model settings
+#h-step
+h<-1
+# test
+library(moments)
+library(nonlinearTseries)
+abcd<-nonlinearityTest(y, verbose = TRUE)
+bds.test(y)
+```
+
+# Train-Val-Test Split
+
+```{r}
+set<-Train_Test_Split(X_lag1_ts,y_ts, c(0.6,0.4))
+autoplot(100*set$y_train,ylab = "y",xlab = "Year",main = "Variable") +autolayer(100*set$y_test,series = "Test")
+```
+
+```{r}
+#Recession plot
+#https://rpubs.com/rfrostbrewer/codethroughexample
+library(dplyr)
+library(ggpmisc)
+data_orig<-Data_Select_Period(data,transform = FALSE,end=c(2022,12))#Data_Transform(data,transform = FALSE)
+recession_data_old<-read.csv("data/USREC-2.csv")[-(397:402),]
+recession_data<-recession_data_old[(157:dim(recession_data_old)[1]),]
+
+recession_data$DATA<-as.vector(data_orig)
+recession_data$REC<-c(0,diff(recession_data$USREC))
+recessions_start_end <- recession_data %>% 
+  mutate(recession_change = USREC - lag(USREC)) %>% 
+  filter(recession_change != 0)
+
+recessions <- tibble(start = filter(recessions_start_end, recession_change == 1)$DATE,
+                      end = filter(recessions_start_end, recession_change == -1)$DATE)
+recession_data$RETURN<-y
+
+ggplot(data = recession_data,aes(x = as.Date(DATE)))+
+  geom_rect(data = recessions, 
+            aes(xmin = as.Date(start), xmax = as.Date(end), ymin = -30, ymax = 150),
+            inherit.aes = FALSE, fill = "grey70", alpha = 0.3) + #grey70, blue
+  geom_line(aes(y = DATA,colour="WTI"),colour="black")+
+  labs(x = NULL, 
+       y = "Price/Barrel in $",
+       color = NULL
+       #title = "WTI Crude Oil Prices from 2003-2023",
+       #subtitle = "From 1987-2021, comparing the top 1% and bottom 50% \n(National recessions shaded)",
+       #caption = "Source: Federal Reserve Economic Data"
+       ) +
+  # annotate("segment", x = as.Date.factor("2001-06-01"),
+  #          xend = as.Date.factor("2001-06-01"),
+  #          y = 28, yend = 48, colour = "#666666", size=0.2, alpha=0.6) +
+  # annotate(geom = "text", x = as.Date.factor("2001-06-01"), y = 58,
+  #          label = "Bush Tax Cut  \n Jun 2001 & May 2003  ",
+  #          fontface = "italic", vjust = 1, color = "#666666", size = 2) +
+  annotate("segment", x = as.Date.factor("2008-06-01"),
+           xend = as.Date.factor("2008-06-01"),
+           y = 133, yend = 143, colour = "#666666", size=0.2, alpha=0.6) +
+  annotate(geom = "text", x = as.Date.factor("2008-06-01"), y = 146,
+           label = "Global Fianancial Collapse",
+           fontface = "italic", vjust = 1, color = "#666666", size = 2) +
+  annotate("segment", x = as.Date.factor("2020-01-01"),
+           xend = as.Date.factor("2020-01-01"),
+           y = 56, yend = 76, colour = "#666666", size=0.2, alpha=0.6) +
+  annotate(geom = "text", x = as.Date.factor("2020-01-01"), y = 85,
+           label = "COVID-19 & Russia- \n Saudi price war",
+           fontface = "italic", vjust = 1, color = "#666666", size = 2) +
+  annotate("segment", x = as.Date.factor("2009-01-01"),
+           xend = as.Date.factor("2009-01-01"),
+           y = 41, yend = 21, colour = "#666666", size=0.2, alpha=0.6) +
+  annotate(geom = "text", x = as.Date.factor("2009-01-01"), y = 18,
+           label = "OPEC cuts production",
+           fontface = "italic", vjust = 1, color = "#666666", size = 2) +
+  # annotate("segment", x = as.Date.factor("2001-09-01"),
+  #          xend = as.Date.factor("2001-09-01"),
+  #          y = 26, yend = 46, colour = "#666666", size=0.2, alpha=0.6) +
+  # annotate(geom = "text", x = as.Date.factor("2001-09-01"), y = 49,
+  #          label = "9/11 Attacks",
+  #          fontface = "italic", vjust = 1, color = "#666666", size = 2) +
+  # annotate("segment", x = as.Date.factor("1999-03-01"),
+  #          xend = as.Date.factor("1999-03-01"),
+  #          y = 15, yend = 35, colour = "#666666", size=0.2, alpha=0.6) +
+  # annotate(geom = "text", x = as.Date.factor("1999-03-01"), y = 38,
+  #          label = "OPEC cuts production",
+  #          fontface = "italic", vjust = 1, color = "#666666", size = 2) +
+  annotate("segment", x = as.Date.factor("2022-03-01"),
+           xend = as.Date.factor("2022-03-01"),
+           y = 108, yend = 128, colour = "#666666", size=0.2, alpha=0.6) +
+  annotate(geom = "text", x = as.Date.factor("2022-03-01"), y = 131,
+           label = "Russia invades Ukraine",
+           fontface = "italic", vjust = 1, color = "#666666", size = 2) +
+  # annotate("segment", x = as.Date.factor("2003-10-01"),
+  #          xend = as.Date.factor("2003-10-01"),
+  #          y = 36, yend = 56, colour = "#666666", size=0.2, alpha=0.6) +
+  # annotate(geom = "text", x = as.Date.factor("2003-10-01"), y = 59,
+  #          label = "Iraq invades Kuwait",
+  #          fontface = "italic", vjust = 1, color = "#666666", size = 2) +
+  annotate("segment", x = as.Date.factor("2014-07-01"),
+           xend = as.Date.factor("2014-07-01"),
+           y = 104, yend = 124, colour = "#666666", size=0.2, alpha=0.6) +
+  annotate(geom = "text", x = as.Date.factor("2014-07-01"), y = 127,
+           label = "Global oversupply",
+           fontface = "italic", vjust = 1, color = "#666666", size = 2) +
+  annotate("segment", x = as.Date.factor("2005-01-01"),
+           xend = as.Date.factor("2005-01-01"),
+           y = 47, yend = 27, colour = "#666666", size=0.2, alpha=0.6) +
+  annotate(geom = "text", x = as.Date.factor("2005-01-01"), y = 24,
+           label = "Low spare capacity",
+           fontface = "italic", vjust = 1, color = "#666666", size = 2) +
+  annotate("segment", x = as.Date.factor("2011-01-01"),
+           xend = as.Date.factor("2011-01-01"),
+           y = 89, yend = 69, colour = "#666666", size=0.2, alpha=0.6) +
+  annotate(geom = "text", x = as.Date.factor("2011-01-01"), y = 66,
+           label = "Arab Spring",
+           fontface = "italic", vjust = 1, color = "#666666", size = 2) +
+  annotate("segment", x = as.Date.factor("2015-01-01"),
+           xend = as.Date.factor("2015-01-01"),
+           y = 47, yend = 27, colour = "#666666", size=0.2, alpha=0.6) +
+  annotate(geom = "text", x = as.Date.factor("2015-01-01"), y = 24,
+           label = "OPEC production quota unchanged",
+           fontface = "italic", vjust = 1, color = "#666666", size = 2) +
+  geom_line(aes(x = as.Date(DATE), y = RETURN, colour="Return"), colour = "red")+
+  #scale_colour_manual("", 
+  #                    values = c("black", "red")) 
+  theme_minimal()
+  #theme_ipsum_rc()
+
+#autoplot(data_orig,ylab = "y",xlab = "Year",main = "Crude Oil Prices from 2003-2023") 
+```
+
+
+```{r}
+#save csv files for python
+X_lag1_ts<-cbind(y_lag1, kilian_lag1, delta_stock_lag1, cpi_lag1,prod_lag1)#
+set<-Train_Test_Split(X_lag1_ts,y_ts, c(0.6,0.4))
+write.csv(set$X_train, file = "data/Pre-processed data/X_train.csv", row.names = FALSE)
+write.csv(set$y_train, file = "data/Pre-processed data/y_train.csv", row.names = FALSE)
+write.csv(set$X_val, file = "data/Pre-processed data/X_val.csv", row.names = FALSE)
+write.csv(set$y_val, file = "data/Pre-processed data/y_val.csv", row.names = FALSE)
+write.csv(set$X_test, file = "data/Pre-processed data/X_test.csv", row.names = FALSE)
+write.csv(set$y_test, file = "data/Pre-processed data/y_test.csv", row.names = FALSE)
+#write.csv(set$y_train, file = "X_train.csv", row.names = FALSE)
+
+```
+
+# Random Walk
+```{r}
+step <- 1
+R <- as.integer(length(set$y_test)/step)
+y_hat_RW <- c()
+T1 <- dim(set$X_train)[1]+dim(set$X_test)[1]
+T <- T1-R*step
+for (i in 1:R){
+    y1 <- window(y_ts, start = c(2003,(1+(i-1)*step)), end = c(2003,(T+step*(i-1))))
+    model <- rwf(y1,step)
+    #model<-mean(y1)
+    y_pred <- predict(model,step)$mean
+    #y_pred<-rep(model,step)
+    y_hat_RW <- c(y_hat_RW,y_pred)
+}
+MSPE_RW <- sqrt(1/(dim(set$X_test)[1])*sum((y_hat_RW-as.vector(set$y_test))^2))
+MAPE_RW <- 1/(dim(set$X_test)[1])*sum(abs(y_hat_RW-as.vector(set$y_test)))
+print(paste("MSFE for RW =", MSPE_RW))
+print(paste("MAPE for RW =", MAPE_RW))
+```
+
+
+
+# ARMA
+
+```{r}
+library(forecast)
+acf(y_ts)
+pacf(y_ts)
+model.auto<-auto.arima(y_ts)
+summary(y_ts)
+#model.man<-Arima(y,order = c(1,0,1))
+#summary(model.man)
+predict(model.auto,h)
+```
+
+```{r}
+library(forecast)
+step <- 12
+R <- as.integer(length(set$y_test)/step)
+y_hat_ARMA <- c()
+lower_ARMA<-c()
+upper_ARMA<-c()
+T1 <- dim(set$X_train)[1]+dim(set$X_test)[1]
+T <- T1-R*step
+for (i in 1:R){
+    y1 <- window(y_ts, start = c(2003,(1+(i-1)*step)), end = c(2003,(T+step*(i-1))))
+    model <- auto.arima(y1)
+    #print(model$coef)
+    y_pred <- as.vector(forecast(model,step)$mean) #predict(model,step)$pred
+    lower_ARMA <- c(lower_ARMA,as.vector(forecast(model,step)$lower[,2]))
+    upper_ARMA <- c(upper_ARMA,as.vector(forecast(model,step)$upper[,2]))
+    y_hat_ARMA <- c(y_hat_ARMA,y_pred)
+}
+MSPE_ARMA <- sqrt(1/(dim(set$X_test)[1])*sum((y_hat_ARMA-as.vector(set$y_test))^2))
+MAPE_ARMA <- 1/(dim(set$X_test)[1])*sum(abs(y_hat_ARMA-as.vector(set$y_test)))
+print(paste("MSFE for ARMA =", MSPE_ARMA))
+print(paste("MAPE for ARMA =", MAPE_ARMA))
+```
+```{r}
+y_hat_LSTM_3_step<-as.numeric(read.csv("y_hat_LSTM_3_step.csv",header = FALSE))
+dm.test((y_hat_ARMA-set$y_test),(y_hat_LSTM_3_step-set$y_test),h=3,alternative = "greater",power=2)
+```
+
+
+
+# ARDL
+```{r}
+library(forecast)
+library(ARDL)
+X_ARDL_ts<-cbind(delta_stock_lag1)
+step <- 1
+R <- as.integer(length(set$y_test)/step)
+y_hat_ARDL <- c()
+T1 <- dim(set$X_train)[1]+dim(set$X_test)[1]
+T <- T1-R*step
+for (i in 1:R){
+    X1 <- window(X_ARDL_ts, start = c(2003,(1+(i-1)*step)), end = c(2003,(T+step*(i-1))))
+    y1 <- window(y_ts, start = c(2003,(1+(i-1)*step)), end = c(2003,(T+step*(i-1))))
+    #Data<-as.data.frame(cbind(y1,X1))
+    X2 <- window(X_ARDL_ts, start = c(2003,(T+1+step*(i-1))), end = c(2003,(T+step*(i))))
+    #print(X2)
+    model <- auto.arima(y1,xreg=X1)
+    #model <- auto_ardl(y1~X1.cpi_lag1+ X1.kilian_lag1+ X1.delta_stock_lag1+ X1.prod_lag1,data=Data, max_order=5)
+    #print(i)
+    #print(model$best_order)
+    y_pred <- predict(model,n.ahead = step,newxreg = X2)$pred
+    print(y_pred)
+    y_hat_ARDL <- c(y_hat_ARDL,y_pred)
+    #print(i)
+}
+MSPE_ARDL <- sqrt(1/(dim(set$X_test)[1])*sum((y_hat_ARDL-as.vector(set$y_test))^2))
+MAPE_ARDL <- 1/(dim(set$X_test)[1])*sum(abs(y_hat_ARDL-as.vector(set$y_test)))
+print(paste("MSFE for ARDL =", MSPE_ARDL))
+print(paste("MAPE for ARDL =", MAPE_ARDL))
+```
+
+
+
+# VAR
+```{r}
+library(vars)
+Y_ts<-cbind(y_ts,cpi,kilian,prod,delta_stock)
+var_model <- VAR(Y_ts, p = 1)
+pred_VAR<-predict(var_model,n.ahead = 1)
+```
+
+```{r}
+step <- 1
+Y_ts<-cbind(y_ts,kilian,delta_stock)
+R <- as.integer(length(set$y_test)/step)
+y_hat_VAR <- c()
+T1 <- dim(set$X_train)[1]+dim(set$X_test)[1]
+T <- T1-R*step
+for (i in 1:R){
+    Y1 <- window(Y_ts, start = c(2003,(1+(i-1)*step)), end = c(2003,(T+step*(i-1))))
+    order_select<-as.integer(VARselect(Y1)$selection[1]) #AIC
+    model <- VAR(Y1,order_select)
+    print(model$p)
+    y_pred <- as.vector(predict(model,n.ahead =step)$fcst$y_ts[,1])
+    y_hat_VAR <- c(y_hat_VAR,y_pred)
+}
+MSPE_VAR <- sqrt(1/(dim(set$X_test)[1])*sum((y_hat_VAR-as.vector(set$y_test))^2))
+MAPE_VAR <- 1/(dim(set$X_test)[1])*sum(abs(y_hat_VAR-as.vector(set$y_test)))
+print(paste("MSFE for VAR =", MSPE_VAR))
+print(paste("MAPE for VAR =", MAPE_VAR))
+```
+
+
+# tvAR
+
+```{r}
+library(tvReg)
+library(Matrix)
+model<-tvAR(y_ts,1,type="const", est="ll", tkernel="Gaussian")
+abc<-forecast(model,n.ahead=1) #Use forecast not predict!!!
+```
+
+```{r}
+library(tvReg)
+step <- 1
+R <- as.integer(length(set$y_test)/step)
+y_hat_tvAR <- c()
+T1 <- dim(set$X_train)[1]+dim(set$X_test)[1]
+T <- T1-R*step
+for (i in 1:R){
+    y1 <- window(y_ts, start = c(2003,(1+(i-1)*step)), end = c(2003,(T+step*(i-1))))
+    model <- tvAR(y1,1,type = "const",est = "ll",tkernel = "Epa")
+    y_pred <- forecast(model,n.ahead=step)
+    y_hat_tvAR <- c(y_hat_tvAR,y_pred)
+}
+MSPE_tvAR <- sqrt(1/(dim(set$X_test)[1])*sum((y_hat_tvAR-as.vector(set$y_test))^2))
+MAPE_tvAR <- 1/(dim(set$X_test)[1])*sum(abs(y_hat_tvAR-as.vector(set$y_test)))
+print(paste("MSFE for tvAR =", MSPE_tvAR))
+print(paste("MAPE for tvAR =", MAPE_tvAR))
+```
+
+# tvVAR
+```{r}
+model<-tvVAR(Y_ts,1,type="const", est="ll", tkernel="Epa",z = as.vector(y_ts))
+abc<-forecast(model,n.ahead=h) #Use forecast not predict!!!
+```
+
+```{r}
+step <- 1
+#Y_lag1_ts<-cbind(y_lag1, kilian_lag1,delta_stock_lag1)[1,]
+Y_ts<-cbind(y_ts,kilian,delta_stock)
+R <- as.integer(length(set$y_test)/step)
+y_hat_tvVAR <- c()
+T1 <- dim(set$X_train)[1]+dim(set$X_test)[1]
+T <- T1-R*step
+for (i in 1:R){
+    Y1 <- window(Y_ts, start = c(2003,(1+(i-1)*step)), end = c(2003,(T+step*(i-1))))
+    #Y_lag1<- window(Y_lag1_ts, start = c(2003,(1+(i-1)*step)), end = c(2003,(T+step*(i-1))))
+    y1<-window(y_lag1, start = c(2003,(1+(i-1)*step)), end = c(2003,(T+step*(i-1))))
+    y2<-window(y_ts, start = c(2003,(1+(i-1)*step)), end = c(2003,(T+step*(i-1))))
+    model <- tvVAR(Y1,1,type="const", est="ll", tkernel="Epa",z = as.vector(y1))
+    y_pred <- forecast(model,n.ahead =step,newz = as.vector(tail(y2,step)))[,1]
+    y_hat_tvVAR <- c(y_hat_tvVAR,y_pred)
+}
+MSPE_tvVAR <- sqrt(1/(dim(set$X_test)[1])*sum((y_hat_tvVAR-as.vector(set$y_test))^2))
+MAPE_tvVAR <- 1/(dim(set$X_test)[1])*sum(abs(y_hat_tvVAR-as.vector(set$y_test)))
+print(paste("MSFE for tvVAR =", MSPE_tvVAR))
+print(paste("MAPE for tvVAR =", MAPE_tvVAR))
+```
+
+
+# FAR
+```{r}
+library(tvReg)
+model<-tvAR((y_ts),type=c("const"),3,z=(y_lag1), est="ll", tkernel="Gaussian")
+forecast(model,n.ahead=1, newz = (tail(y,1))) #Use forecast not predict!!!
+```
+
+```{r}
+library(tvReg)
+step <- 1
+R <- as.integer(length(set$y_test)/step)
+y_hat_FAR <- c()
+T1 <- dim(set$X_train)[1]+dim(set$X_test)[1]
+T <- T1-R*step
+for (i in 1:R){
+    y1 <- window(y_ts, start = c(2003,(1+(i-1)*step)), end = c(2003,(T+step*(i-1))))
+    y1_lag1<-window(y_lag1, start = c(2003,(1+(i-1)*step)), end = c(2003,(T+step*(i-1))))
+    model <- tvAR(y1,type=c("const"),1,z=y1_lag1, est="ll", tkernel="Epa")
+    y_pred <- forecast(model,n.ahead=step, newz = as.vector(tail(y1,step)))
+    y_hat_FAR <- c(y_hat_FAR,y_pred)
+}
+MSPE_FAR <- sqrt(1/(dim(set$X_test)[1])*sum((y_hat_FAR-as.vector(set$y_test))^2))
+MAPE_FAR <- 1/(dim(set$X_test)[1])*sum(abs(y_hat_FAR-as.vector(set$y_test)))
+print(paste("MSFE for FAR =", MSPE_FAR))
+print(paste("MAPE for FAR =", MAPE_FAR))
+```
+
+```{r}
+plot(as.vector(set$y_test),type="l")
+lines(y_hat_FAR,col="yellow")
+lines(y_hat_ARMA,col="green")
+lines(y_hat_tvAR,col="red")
+lines(y_hat_RW,col="blue")
+lines(y_hat_ARDL,col="orange")
+lines(y_hat_tvVAR,col="pink")
+#lines(y_hat_GPR,col="purple")
+```
+
+```{r}
+#library(kableExtra)
+library(xtable)
+Methods_table <- c("RW", "ARMA", "ARDL", "VAR", "tvAR", "tvVAR","FAR")
+MSE_table <- round(c(MSPE_RW, MSPE_ARMA, MSPE_ARDL, MSPE_VAR, MSPE_tvAR,MSPE_tvVAR,MSPE_FAR),2)
+MAPE_table <- round(c(MAPE_RW, MAPE_ARMA, MAPE_ARDL, MAPE_VAR, MAPE_tvAR,MAPE_tvVAR,MAPE_FAR),2)
+
+# Create the dataframe
+df_results <- data.frame(Method = Methods_table, MSPE = MSE_table, MAPE = MAPE_table)
+df_results
+#xtable(df_results)
+```
+
+```{r}
+dm.test((y_hat_ARMA-as.vector(set$y_test)),(y_hat_ANN_1_step-as.vector(set$y_test)),h=1, alternative="greater", power = 1)#Power
+```
+
+
+## Gaussian Process Regression
+
+### BM kernel
+
+```{r}
+library(ggplot2)
+source("Kernels.R")
+x <- seq(0, 10, length.out = 501)  # x-coordinates
+N <- 5  # no. of draws
+Y <- draw_samples(x, N, kernel_fn = bm_kernel ,centred=TRUE,squared=TRUE)
+df <- data.frame(x = rep(x, N), y = as.vector(Y), group = rep(1:N, each = length(x)))
+# Plot the data
+plot1<-ggplot(df, aes(x = x, y = y, group = group, color = factor(group))) +
+  geom_line(size = 0.4) +
+  labs(x = "x", y = "f(x)")+ #, title = "Brownian motion kernel")+
+  theme_bw()+
+  theme(legend.position = "none",panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank())
+ggsave("Brownian motion kernel paths (centred+squared).png", plot = plot1, width = 4, height = 4)
+plot1
+  #scale_color_manual(values = col_list) 
+```
+
+### Matern Kernel
+
+```{r}
+Y <- draw_samples(x, N, kernel_fn = matern_kernel,nu = 1.5, sigma = 1, l = 1)
+df <- data.frame(x = rep(x, N), y = as.vector(Y), group = rep(1:N, each = length(x)))
+# Plot the data
+ggplot(df, aes(x = x, y = y, group = group, color = factor(group))) +
+  geom_line(size = 0.5) +
+  labs(x = "x", y = "f(x)", title = "Matern kernel")+
+  theme_bw()+
+  theme(legend.position = "none",panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank())
+  #scale_color_manual(values = col_list) 
+```
+
+## RBF Kernel
+```{r}
+Y <- draw_samples(x, N, kernel_fn = se_kernel,sigma = 1, length=1)
+df <- data.frame(x = rep(x, N), y = as.vector(Y), group = rep(1:N, each = length(x)))
+# Plot the data
+ggplot(df, aes(x = x, y = y, group = group, color = factor(group))) +
+  geom_line(size = 0.5) +
+  labs(x = "x", y = "f(x)", title = "RBF kernel")+
+  theme_bw()+
+  theme(legend.position = "none",panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank())
+  #scale_color_manual(values = col_list) 
+```
+
+
+```{r}
+source("Kernels.R")
+library(mvtnorm)
+library(RColorBrewer)
+library(plgp)
+# Define the range and number of points for x1 and x2
+n_points <- 20
+x1 <- seq(0, 3, length.out = n_points)
+x2 <- seq(0, 3, length.out = n_points)
+
+# Sample from the bivariate normal distribution
+N <- 2  # Number of samples
+Y<-draw_samples_3D(x1,x2, N,seed=123, kernel_fn = bm_kernel,centred = TRUE,squared = TRUE)
+par(mfrow=c(1,2))
+persp(x1, x2, matrix(Y[1,], ncol=20), theta=-30, phi=30, xlab="x1",
+     ylab="x2", zlab="y", main = "Centered ANOVA kernel")
+persp(x1, x2, matrix(Y[2,], ncol=20), theta=-40, phi=30, xlab="x1",
+     ylab="x2", zlab="y")
+
+```
+
+```{r}
+source("Kernels.R")
+library(mvtnorm)
+library(RColorBrewer)
+library(plgp)
+
+levelpersp <- function(x, y, z, colors=topo.colors, ...) {
+  ## getting the value of the midpoint
+  zz <- (z[-1,-1] + z[-1,-ncol(z)] + z[-nrow(z),-1] + z[-nrow(z),-ncol(z)])/4
+  ## calculating the breaks
+  breaks <- hist(zz, plot=FALSE)$breaks
+  ## cutting up zz
+  cols <- colors(length(breaks)-1)
+  zzz <- cut(zz, breaks=breaks, labels=cols)
+  ## plotting
+  persp(x, y, z, col=as.character(zzz), ...)
+  ## return breaks and colors for the legend
+  list(breaks=breaks, colors=cols)
+}
+# Define the range and number of points for x1 and x2
+n_points <- 20
+x1 <- seq(0, 3, length.out = n_points)
+x2 <- seq(0, 3, length.out = n_points)
+
+# Sample from the bivariate normal distribution
+N <- 1  # Number of samples
+Y <- draw_samples_3D(x1, x2, N, seed = 125, kernel_fn = bm_kernel, centred = TRUE, squared = TRUE)
+
+# Create the 3D plots with colors based on z-values using persp
+#par(mfrow = c(1, 3))
+levelpersp(x1, x2, (matrix(Y, ncol = n_points)), theta = -30, phi = 30, colors = rainbow)
+
+#levelpersp(x1, x2, (matrix(Y[2, ], ncol = n_points)), theta = -30, phi = 30, colors = topo.colors)
+#levelpersp(x1, x2, (matrix(Y[3, ], ncol = n_points)), theta = -30, phi = 30, colors = topo.colors)
+```
+
+```{r}
+library(corrplot)
+source("Data-preprocessing.R")
+X_corr<-as.data.frame(cbind(y_ts, y_lag1, y_lag2, y_lag12, cpi_lag1,delta_stock_lag1, kilian_lag1,prod_lag1))
+colnames(X_corr) <- c("WTI", "WTI[-1]","WTI[-2]", "WTI[-12]", "CPI[-1]", "STOCK[-1]","KILIAN[-1]", "PROD[-1]")
+# Compute the correlation matrix (replace 'data' with your actual dataset)
+correlation_matrix <- cor(X_corr)
+library(ggcorrplot)
+# Create a fancy correlation plot
+#corrplot(correlation_matrix)
+ ggcorrplot(t(correlation_matrix),
+           hc.order = FALSE,
+           #type = "upper",
+           lab = TRUE)
+# library(PerformanceAnalytics)
+# chart.Correlation(correlation_matrix)
+#ggpairs(X_corr)
+# corrplot(correlation_matrix, method = "color", #type = "upper",
+#          tl.cex = 0.8, tl.col = "black", tl.srt = 45,
+#          #col = colorRampPalette(c("blue", "white", "red"))(100),
+#          addCoef.col = "black", number.cex = 0.7)
+```
+
+
+
+## Gaussian Process Regression implementation
+
+```{r}
+source("GPR.R")
+library(zoo)
+K<-0.08*K_gram(set$X_train[,1],kernel_fn = bm_kernel_L2,centred = TRUE,squared = FALSE)
+k<-0.08*kernel_vec(set$X_train[,1],y=set$y_val,bm_kernel_L2,squared = FALSE)
+k_xnew<-K_gram(set$X_val[,1],kernel_fn = bm_kernel_L2,centred = TRUE,squared = FALSE)
+I_sig<-diag(240)*0.08^2
+y<-as.matrix(set$y_train)
+
+#plot(x,y,xlim=xl,ylim=yl,xlab="x",ylab="f(x)",pch=16,col="red")
+plot(as.yearmon(time(set$X_train[,1])),set$y_train,xlim=c(2003,2023),xlab="x",ylab="f(x)",pch=16,col="red")
+pred_mu<-t(k)%*%solve(K+I_sig)%*%y
+pred_cov<-k_xnew-t(k)%*%solve(K+I_sig)%*%k
+# Extract the standard deviations at the test points (square root of the
+# diagonal elements of the covariance matrix)
+pred_sd = sqrt(diag(pred_cov))
+# Plot the predictions as error bars
+testx<-as.yearmon(time(set$y_val))
+points(testx,pred_mu,pch=16)
+points(testx,set$y_val,col="blue")
+#arrows(testx,pred_mu-pred_sd,testx,pred_mu+pred_sd, length=0.05, angle=90, code=3,pch=16)
+
+RMSE<-(sum((pred_mu-set$y_val)^2))
+print(RMSE)
+```
+
+```{r}
+# y_stan<-as.vector(set$y_train)
+# source('GPR.R')
+# #data=list(N=N,K_gram1=K_gram(set$X_train[,1],kernel_fn = bm_kernel_L2,centred = TRUE,squared = TRUE)
+# K_gram1=K_gram(set$X_train[,1][236:240],kernel_fn = bm_kernel_L2,centred = TRUE,squared = TRUE)
+# K_gram2=K_gram(set$X_train[,2][236:240],kernel_fn = bm_kernel_L2,centred = TRUE,squared = TRUE)
+# x_new1<-as.vector(set$y_train)[N]
+# x_new2<-as.vector(set$y_train)[N-1]
+# mod = cmdstan_model("MCMC.stan",include_paths = "~/Documents/LSE/Dissertation/Code/ANOVA-kernel/")
+# data=list(N=5,
+#           M=1,
+#           K_gram1=K_gram1,
+#           K_gram2=K_gram2,
+#           k_vec1=as.matrix(kernel_vec(set$X_train[,1][236:240],x_new1,bm_kernel_L2,TRUE)),
+#           k_vec2=as.matrix(kernel_vec(set$X_train[,2][236:240],x_new2,bm_kernel_L2,TRUE)),
+#           y=y_stan[236:240],
+#           x1=as.vector(set$X_train[,1][236:240]),
+#           x2=as.vector(set$X_train[,2][236:240]),
+#           x_new1=x_new1,
+#           x_new2=x_new2
+#           )
+# fit = mod$sample(
+#   data = data, 
+#   seed = 123, 
+#   iter_warmup = 200,
+#   iter_sampling = 300,
+#   save_warmup = TRUE,
+#   chains = 2, 
+#   parallel_chains = 2,
+#   refresh = 10
+#   #fixed_param = TRUE
+# )
+
+```
+
+
+
+
+```{r}
+# # Fit the model
+# library(ggplot2)
+# library(plyr)
+# library(cmdstanr)
+# library(rstan)
+# N<-length(set$y_train)
+# mod = cmdstan_model("MCMC test.stan",include_paths = "~/Documents/LSE/Dissertation/Code/ANOVA-kernel/")
+# y_stan<-as.vector(set$y_train)
+# #data=list(N=N,K_gram1=K_gram(set$X_train[,1],kernel_fn = bm_kernel_L2,centred = TRUE,squared = TRUE)
+# K_gram1=K_gram(set$X_train[,1][236:240],kernel_fn = bm_kernel_L2,centred = TRUE,squared = TRUE)
+# K_gram2=K_gram(set$X_train[,2][236:240],kernel_fn = bm_kernel_L2,centred = TRUE,squared = TRUE)
+# x_new1<-as.vector(set$y_train)[N]
+# x_new2<-as.vector(set$y_train)[N-1]
+# data=list(N=5,
+#           M=1,
+#           K_gram1=K_gram1,
+#           K_gram2=K_gram2,
+#           k_vec1=as.matrix(kernel_vec(set$X_train[,1][236:240],x_new1,bm_kernel_L2,TRUE)),
+#           k_vec2=as.matrix(kernel_vec(set$X_train[,2][236:240],x_new2,bm_kernel_L2,TRUE)),
+#           y=y_stan[236:240]
+#           )
+# fit = mod$sample(
+#   data = data, 
+#   seed = 123, 
+#   iter_warmup = 200,
+#   iter_sampling = 300,
+#   save_warmup = TRUE,
+#   chains = 2, 
+#   parallel_chains = 2,
+#   refresh = 10
+# )
+```
+
+```{r}
+# print(fit$summary())
+# library(shinystan)
+# launch_shinystan(fit)
+```
+
+```{r}
+# Fit the model
+library(ggplot2)
+library(plyr)
+library(cmdstanr)
+library(rstan)
+N<-length(set$y_train)
+mod = cmdstan_model("MCMC pred.stan",include_paths = "~/Documents/LSE/Dissertation/Code/ANOVA-kernel/")
+y_stan<-as.vector(set$y_train)
+#data=list(N=N,K_gram1=K_gram(set$X_train[,1],kernel_fn = bm_kernel_L2,centred = TRUE,squared = TRUE), y=as.vector(set$y_train))
+data_MCMC<-list(N=length(set$y_train),
+          x1=as.vector(set$X_train[,1]),
+          x2=as.vector(set$X_train[,2]),
+          y=as.vector(set$y_train),
+          M=1,
+          x_new1=as.matrix(1), 
+          x_new2=as.matrix(1) 
+          )
+fit = mod$sample(
+  data = data_MCMC, 
+  seed = 123, 
+  iter_warmup = 200,
+  iter_sampling = 300,
+  save_warmup = TRUE,
+  chains = 2, 
+  parallel_chains = 2,
+  refresh = 10
+)
+impact_1<-as.vector(fit$summary(variables = "f_one")$mean)
+impact_2<-as.vector(fit$summary(variables = "f_two")$mean)
+impact_12<-as.vector(fit$summary(variables = "f_onetwo")$mean)
+plot(as.vector(set$y_train),type="l")
+lines(impact_1)
+#lines(impact_2)
+lines(impact_12)
+#lines(impact_1+impact_2+impact_12,col="green")
+```
+
+
+```{r}
+time_idx<-as.Date(time(set$y_test)) 
+y_hat_LSTM_1_step<-as.numeric(read.csv("y_hat_LSTM_1_step.csv",header=FALSE))
+y_hat_ANN_1_step<-as.numeric(read.csv("y_hat_ANN_1_step.csv",header=FALSE))
+results_data_1_step<-as.data.frame(cbind(time_idx,as.vector(set$y_test), y_hat_ARMA,y_hat_GPR_1_step,y_hat_FAR,y_hat_ANN_1_step))
+ggplot(data =results_data_1_step,aes(x = as.Date(time_idx)))+
+  geom_line(aes(y = V2),colour="black")+#,colour="black"
+  geom_line(aes(y = y_hat_ARMA,colour="ARMA"),alpha=0.7)+#,colour="red"
+  #geom_line(aes(y = y_hat_GPR_1_step,colour="GPR"),alpha=0.7)+#,colour="blue"
+  geom_line(aes(y = y_hat_FAR,colour="FAR"),alpha=0.7)+#,colour="green"
+  geom_line(aes(y = y_hat_ANN_1_step,colour="ANN"),alpha=0.7)+#,colour="ANN"
+  labs(x = NULL, 
+       y = "WTI",
+       color = NULL
+       #title = "WTI Crude Oil Prices from 2003-2023",
+       #subtitle = "From 1987-2021, comparing the top 1% and bottom 50% \n(National recessions shaded)",
+       #caption = "Source: Federal Reserve Economic Data"
+       ) +
+  scale_color_manual(values = c( "ARMA" = "red", "FAR" = "green", "ANN" = "blue"),
+                     breaks = c( "ARMA", "FAR", "ANN"),
+                     labels = c( "ARMA", "FAR", "ANN")) +
+  theme_minimal()+
+  theme(legend.position = "bottom")
+```
+
+```{r}
+impact_0<-as.vector(fit$summary(variables = "f_zero")$mean)
+impact_1<-as.vector(fit$summary(variables = "f_one")$mean)
+impact_2<-as.vector(fit$summary(variables = "f_two")$mean)
+impact_3<-as.vector(fit$summary(variables = "f_three")$mean)
+impact_4<-as.vector(fit$summary(variables = "f_four")$mean)
+impact_5<-as.vector(fit$summary(variables = "f_five")$mean)
+total<-as.vector(fit$summary(variables = "f")$mean)
+plot(as.vector(set$y_train),type="l")
+#lines(impact_0)
+lines(impact_1)
+#lines(impact_2)
+#lines(impact_3)
+lines(impact_4)
+#lines(impact_5)
+#lines((impact_1+impact_2+impact_3+impact_4+impact_5),col="red")
+lines(total,col="green")
+```
+
+```{r}
+#mu_wti<-as.vector(fit$summary(variables = "mu_predicted")$mean)
+#t_wti<-seq(-28,17,0.5)
+#mu_kilian<-as.vector(fit$summary(variables = "mu_predicted")$mean)
+#t_kilian<-seq(-100,85,0.5)
+#mu_delta_stock<-as.vector(fit$summary(variables = "mu_predicted")$mean)
+#t_delta_stock<-seq(-90,84,0.5)
+#plot(delta_stock_lag1,y)
+#lines(seq(-90,84,0.5),as.vector(fit$summary(variables = "mu_predicted")$mean), col="red")
+#plot(kilian_lag1,y, col="red")
+#points(kilian_lag1,y-impact_1-impact_3-impact_4-impact_5-impact_0)
+#lines(t_kilian,mu_kilian)
+library(ggplot2)
+
+# Create a data frame for your data
+data_123 <- data.frame(
+  delta_stock_lag1 = delta_stock_lag1,
+  y = y,
+  impact_adjusted = y - impact_1 - impact_2 - impact_4 - impact_5 - impact_0
+)
+data_1234<-data.frame(
+   t_delta_stock = t_delta_stock,
+  mu_delta_stock = mu_delta_stock
+)
+
+# Create the ggplot with layers
+gg<-ggplot() +
+  geom_point(data = data_123, aes(x = delta_stock_lag1, y = y), color = "chartreuse", size=1) +
+  geom_point(data = data_123, aes(x = delta_stock_lag1, y = impact_adjusted), color = "blue3", size=1) +
+  geom_line(data = data_1234, aes(x = t_delta_stock, y = mu_delta_stock), color = "black") +
+  labs(
+    #title = "Kilian Lag Plot",
+    x = "STOCK[-1]",
+    y = "WTI"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 16, hjust = 0.5),
+    legend.position = "top",
+    aspect.ratio = 1
+  )
+#ggsave("Kilian.png",plot=gg, path="plots/",width = 10, height=10, units="cm")
+print(gg)
+```
+
+
+
+```{r}
+#impact_0<-as.vector(fit$summary(variables = "f_zero")$mean)
+#impact_1<-as.vector(fit$summary(variables = "f_one")$mean)
+#impact_2<-as.vector(fit$summary(variables = "f_two")$mean)
+#impact_3<-as.vector(fit$summary(variables = "f_three")$mean)
+#impact_4<-as.vector(fit$summary(variables = "f_four")$mean)
+#impact_5<-as.vector(fit$summary(variables = "f_five")$mean)
+#total<-as.vector(fit$summary(variables = "f")$mean)
+#time_idx1<-as.Date(time(y_ts))
+ANOVA_data<-as.data.frame(cbind(time_idx1,impact_0,impact_1,impact_2,impact_3,impact_4,impact_5,y))[60:84,]
+ggplot(data =ANOVA_data,aes(x = as.Date(time_idx1)))+
+  geom_line(aes(y = y),colour="black")+#,colour="black"
+  geom_line(aes(y = impact_1,colour="WTI[-1]"),alpha=0.7)+#,colour="red"
+  #geom_line(aes(y = y_hat_GPR_1_step,colour="GPR"),alpha=0.7)+#,colour="blue"
+  geom_line(aes(y = impact_2,colour="KILIAN[-1]"),alpha=0.7)+#,colour="green"
+  geom_line(aes(y = impact_3,colour="STOCK[-1]"),alpha=0.7)+#,colour="ANN"
+  geom_line(aes(y = (impact_0+impact_4+impact_5),colour="CONST+CPI[-1]+PROD[-1]"),alpha=0.7)+
+  geom_line(aes(y = (impact_1+impact_2+impact_3),colour="WTI[-1]+KILIAN[-1]+STOCK[-1]"))+
+  labs(x = NULL, 
+       y = "WTI",
+       color = NULL
+       #title = "WTI Crude Oil Prices from 2003-2023",
+       #subtitle = "From 1987-2021, comparing the top 1% and bottom 50% \n(National recessions shaded)",
+       #caption = "Source: Federal Reserve Economic Data"
+       ) +
+  scale_color_manual(values = c( "WTI[-1]" = "darkblue", "KILIAN[-1]" = "royalblue", "STOCK[-1]" = "lightskyblue", "CONST+CPI[-1]+PROD[-1]"="yellow","WTI[-1]+KILIAN[-1]+STOCK[-1]"="blue"),
+                     breaks = c( "WTI[-1]", "KILIAN[-1]", "STOCK[-1]","CONST+CPI[-1]+PROD[-1]","WTI[-1]+KILIAN[-1]+STOCK[-1]"),
+                     labels = c( "WTI[-1]", "KILIAN[-1]", "STOCK[-1]","REST","TOTAL")) +
+  theme_minimal()+
+  theme(legend.position = "bottom",
+    plot.title = element_text(size = 16, hjust = 0.5),
+    aspect.ratio = 1
+  )
+```
+
+```{r}
+uncertain_data1<-as.data.frame(cbind(time_idx,y_hat_ARMA,lower_ARMA,upper_ARMA,set$y_test))[37:95,]
+ggplot(data =uncertain_data1,aes(x = as.Date(time_idx)))+
+  geom_ribbon(aes(ymin = lower_ARMA, ymax = upper_ARMA), fill = 'grey90') +
+  geom_line(aes(y = set$y_test[37:95]),colour="black")+
+  geom_line(aes(y = y_hat_ARMA),colour="red")+#,colour="red"
+  #geom_line(aes(y = y_hat_GPR_1_step,colour="GPR"),alpha=0.7)+#,colour="blue"
+  labs(x = NULL, 
+       y = "WTI",
+       color = NULL
+       #title = "WTI Crude Oil Prices from 2003-2023",
+       #subtitle = "From 1987-2021, comparing the top 1% and bottom 50% \n(National recessions shaded)",
+       #caption = "Source: Federal Reserve Economic Data"
+       ) +
+  #scale_color_manual(values = c( "WTI[-1]" = "darkblue", "KILIAN[-1]" = "royalblue", "STOCK[-1]" = "lightskyblue", "CONST+CPI[-1]+PROD[-1]"="yellow","WTI[-1]+KILIAN[-1]+STOCK[-1]"="blue"),
+                   #  breaks = c( "WTI[-1]", "KILIAN[-1]", "STOCK[-1]","CONST+CPI[-1]+PROD[-1]","WTI[-1]+KILIAN[-1]+STOCK[-1]"),
+                   #  labels = c( "WTI[-1]", "KILIAN[-1]", "STOCK[-1]","REST","TOTAL")) +
+  theme_minimal()+
+  theme(
+    aspect.ratio = 1
+  )
+```
+
+
+
+
+
+
+```{r}
+uncertain_data<-as.data.frame(cbind(time_idx,y_hat_GPR,lower_GPR,upper_GPR,set$y_test))[37:95,]
+ggplot(data =uncertain_data,aes(x = as.Date(time_idx)))+
+  geom_ribbon(aes(ymin = lower_GPR, ymax = upper_GPR), fill = 'grey90') +
+  geom_line(aes(y = set$y_test[37:95]),colour="black")+
+  geom_line(aes(y = y_hat_GPR),colour="blue")+#,colour="red"
+  #geom_line(aes(y = y_hat_GPR_1_step,colour="GPR"),alpha=0.7)+#,colour="blue"
+  labs(x = NULL, 
+       y = "WTI",
+       color = NULL
+       #title = "WTI Crude Oil Prices from 2003-2023",
+       #subtitle = "From 1987-2021, comparing the top 1% and bottom 50% \n(National recessions shaded)",
+       #caption = "Source: Federal Reserve Economic Data"
+       ) +
+  #scale_color_manual(values = c( "WTI[-1]" = "darkblue", "KILIAN[-1]" = "royalblue", "STOCK[-1]" = "lightskyblue", "CONST+CPI[-1]+PROD[-1]"="yellow","WTI[-1]+KILIAN[-1]+STOCK[-1]"="blue"),
+                   #  breaks = c( "WTI[-1]", "KILIAN[-1]", "STOCK[-1]","CONST+CPI[-1]+PROD[-1]","WTI[-1]+KILIAN[-1]+STOCK[-1]"),
+                   #  labels = c( "WTI[-1]", "KILIAN[-1]", "STOCK[-1]","REST","TOTAL")) +
+  theme_minimal()+
+  theme(
+    aspect.ratio = 1
+  )
+```
+
+
+```{r}
+# Fit the model
+library(ggplot2)
+library(plyr)
+library(cmdstanr)
+library(rstan)
+N<-length(set$y_train)
+mod = cmdstan_model("MCMC.stan",include_paths = "~/Documents/LSE/Dissertation/Code/ANOVA-kernel/")
+y_stan<-as.vector(set$y_train)
+#data=list(N=N,K_gram1=K_gram(set$X_train[,1],kernel_fn = bm_kernel_L2,centred = TRUE,squared = TRUE), y=as.vector(set$y_train))
+X_train<-cbind(y_lag1,kilian_lag1, delta_stock_lag1, cpi_lag1, prod_lag1, y_lag2)
+X_test<-tail(cbind(y_ts,kilian, delta_stock,cpi, prod, y_lag1),1)
+y_train<-y_ts
+#t<-seq(-90,84,0.5)
+data_MCMC<-list(N=240,
+          x1=as.vector(X_train[,1]), #lag1
+          x2=as.vector(X_train[,2]), 
+          x3=as.vector(X_train[,3]), 
+          x4=as.vector(X_train[,4]), 
+          x5=as.vector(X_train[,5]), 
+          x6=as.vector(X_train[,6]), 
+          y=as.vector(y_train),
+          M=1,
+          x_new1=as.matrix(X_test[,1]), 
+          x_new2=as.matrix(X_test[,2]),
+          x_new3=as.matrix(X_test[,3]), 
+          x_new4=as.matrix(X_test[,4]),
+          x_new5=as.matrix(X_test[,5]), 
+          x_new6=as.matrix(X_test[,6])
+          )
+fit = mod$sample(
+  data = data_MCMC, 
+  seed = 123, 
+  iter_warmup = 200,
+  iter_sampling = 300,
+  save_warmup = TRUE,
+  chains = 2, 
+  parallel_chains = 2,
+  refresh = 10
+)
+
+```
+
+
+
+
+```{r}
+# Fit the model
+library(ggplot2)
+library(plyr)
+library(cmdstanr)
+library(rstan)
+step <- 12
+R <- as.integer(length(set$y_test)/step)
+y_hat_GPR <- c()
+lower_GPR <- c()
+upper_GPR <- c()
+T1 <- dim(set$X_train)[1]+dim(set$X_test)[1]
+T <- T1-R*step
+X_lag1_ts<-cbind(y_lag12,kilian_lag12,delta_stock_lag12,cpi_lag12, prod_lag12,y_lag1)#kilian_lag1
+#X_ts<-cbind(y, cpi, kilian, delta_stock, prod)
+for (i in 1:R){
+    y_train <- window(y_ts, start = c(2003,(1+(i-1)*step)), end = c(2003,(T+step*(i-1))))
+    X_train <- window(X_lag1_ts, start = c(2003,(1+(i-1)*step)), end = c(2003,(T+step*(i-1))))
+    X_test <- window(X_lag1_ts, start = c(2003,(T+1+step*(i-1))), end = c(2003,(T+step*(i))))
+    data_MCMC<-list(N=length(y_train),
+          x1=as.vector(X_train[,1]), #lag1
+          x2=as.vector(X_train[,2]), #cpi
+          x3=as.vector(X_train[,3]), #kilian
+          x4=as.vector(X_train[,4]), #delta stock
+          x5=as.vector(X_train[,5]), #prod
+          x6=as.vector(X_train[,6]), #y_lag2
+          y=as.vector(y_train),
+          M=step,
+          x_new1=as.matrix(X_test[,1]), 
+          x_new2=as.matrix(X_test[,2]),
+          x_new3=as.matrix(X_test[,3]), 
+          x_new4=as.matrix(X_test[,4]),
+          x_new5=as.matrix(X_test[,5]),
+          x_new6=as.matrix(X_test[,6])
+          )
+    mod = cmdstan_model("MCMC.stan",include_paths = "~/Documents/LSE/Dissertation/Code/ANOVA-kernel/")
+    fit <- mod$sample(
+            data = data_MCMC, 
+            seed = 123, 
+            iter_warmup = 200,
+            iter_sampling = 300,
+            save_warmup = TRUE,
+            chains = 2, 
+            parallel_chains = 2,
+            refresh = 10
+            )
+    y_pred <- as.vector(fit$summary(variables = c("mu_predicted"))$mean)
+    sig<-fit$summary(variables = c("sigma"))$mean
+    diag_cov <- diag(matrix(fit$summary(variables = c("var_predicted"))$mean,nrow=step,ncol=step))
+    lower_GPR<-c(lower_GPR, y_pred-1.96*sqrt(diag_cov+sig^2))
+    upper_GPR<-c(upper_GPR, y_pred+1.96*sqrt(diag_cov+sig^2))
+    y_hat_GPR <- c(y_hat_GPR,y_pred)
+    print(i)
+}
+MSPE_GPR <- sqrt(1/(dim(set$X_test)[1])*sum((y_hat_GPR-as.vector(set$y_test))^2))
+MAPE_GPR <- 1/(dim(set$X_test)[1])*sum(abs(y_hat_GPR-as.vector(set$y_test)))
+print(paste("MSFE for GPR =", MSPE_GPR))
+print(paste("MAPE for GPR =", MAPE_GPR))
+```
+
+
+
+
+
+```{r}
+alpha0_hat <- fit$summary(variables = c("alpha0"))$mean
+lambda_1_hat <- fit$summary(variables = c("lambda_1"))$mean
+lambda_2_hat <- fit$summary(variables = c("lambda_2"))$mean
+sigma_hat <- fit$summary(variables = c("sigma"))$mean
+K_hat <- (alpha0_hat)^2*(matrix(1,nrow=N,ncol=N)+lambda_1_hat*K_gram1+lambda_2_hat*K_gram2+lambda_1_hat*lambda_2_hat*K_gram1*K_gram2)
+capital_sigma_hat <- K_hat + (sigma_hat)^2 * diag(1,N,N);
+L_hat <- chol(capital_sigma_hat);
+loglik <- -0.5 * t(y_stan)%*%solve(capital_sigma_hat)%*%y_stan -0.5 *sum(log(diag(L_hat)))-N/2*log(2*pi)
+print(loglik)
+loglik2<- -0.5*t(y_stan)%*%solve((L_hat),solve(t(L_hat),y_stan)) -0.5 *sum(log(diag(L_hat)))-N/2*log(2*pi)
+print(loglik2)
+```
+
+```{r}
+library(bridgesampling)
+library(rstan)
+# cores <- 4
+# options(mc.cores = cores)
+# mod_bridge<-stan_model("MCMC test.stan")
+# stanfit <- bridge <- vector("list", 3)
+# for (k in 1:3) {
+#   stanfit[[k]] <- sampling(mod_bridge,
+#    data = list(N=N,
+#           K_gram1=K_gram1,
+#           K_gram2=K_gram2,
+#           y=y_stan
+#           ),
+#    iter = 11000, warmup = 1000, chains = 4,
+#    #init = init_fun(nchains = 4, k = k, m = 1),
+#    cores = cores, seed = 1)
+#   bridge[[k]] <- bridge_sampler(stanfit[[k]], method = "warp3",
+#    repetitions = 10, cores = cores)
+# }
+mod_bridge<-stan("MCMC.stan", data=data_MCMC,
+          seed = 123,
+  iter= 30,
+  save_warmup = TRUE,
+  chains = 2
+          )
+bridge_sampler(mod_bridge)
+
+```
+
+
+
+
+```{r}
+library(shinystan)
+launch_shinystan(fit)
+```
+
+
+```{r}
+post_samples = fit$draws(format = "df",  inc_warmup = FALSE)
+post_samples$.chain = as.character(post_samples$.chain)
+gg = ggplot(data=post_samples, aes(x=.iteration, y = alpha0, color=.chain))+
+  geom_line() + theme_minimal() 
+gg
+```
+
+```{r}
+fit$summary(variables = c("lp__"))$mean
+```
+
+
+
+```{r}
+posterior_parameter_plot <- function(model) {
+  model %>%
+    spread_draws(sigma_process,
+                 ell_process,
+                 alpha_noise,
+                 beta_noise[dimension]) %>%
+    ungroup() %>%
+    select(-dimension) %>%
+    pivot_longer(sigma_process:beta_noise) %>%
+    mutate(name = factor(name, levels = c('beta_noise',
+                                          'alpha_noise',
+                                          'ell_process',
+                                          'sigma_process')),
+           name = fct_rev(name)) %>%
+    ggplot(aes(value)) +
+    stat_halfeye(normalize = 'panels', fill = 'grey90') +
+    facet_wrap(~ name, scales = 'free') +
+    labs(y = 'Posterior density') +
+    theme(axis.title.x = element_blank(),
+          axis.text.y = element_blank(),
+          legend.position = 'none')
+}
+```
+
+```{r}
+posterior_parameter_plot <- function(model) {
+  draws <- model$draws()
+  draws <- as.data.frame(draws)
+  
+  draws %>%
+    select(sigma_process, ell_process, alpha_noise, starts_with("beta_noise_")) %>%
+    pivot_longer(cols = everything(), names_to = "parameter", values_to = "value") %>%
+    mutate(parameter = factor(parameter, levels = c('beta_noise', 'alpha_noise', 'ell_process', 'sigma_process')),
+           parameter = fct_rev(parameter)) %>%
+    ggplot(aes(value)) +
+    stat_halfeye(normalize = 'panels', fill = 'grey90') +
+    facet_wrap(~ parameter, scales = 'free') +
+    labs(y = 'Posterior density') +
+    theme(axis.title.x = element_blank(),
+          axis.text.y = element_blank(),
+          legend.position = 'none')
+}
+posterior_parameter_plot(fit)
+```
+
+
+```{r}
+# step <- 1
+# R <- 80/step
+# y_hat <- c()
+# X_rolling <- rbind(X_train_RNN, X_val_RNN)
+# y_rolling <- c(y_train, y_val)
+# T1 <- dim(X_rolling)[1]
+# T <- (T1 - step) - R * step
+# 
+# for (i in 1:R) {
+#   X1 <- X_rolling[(i * step):(T + step * i), , ]
+#   y1 <- y_rolling[(i * step):(T + step * i)]
+#   X2 <- X_rolling[(T + step * i):(T + step * (i + 1)), , ]
+#   y2 <- y_rolling[(T + step * i):(T + step * (i + 1))]
+#   model <- GRU()
+#   history <- model$fit(X1, y1, epochs = 100, verbose = 0)
+#   y_pred <- model$predict(X2)[1, ]
+#   y_hat <- c(y_hat, y_pred)
+#   cat(i, "\n")
+# }
+# 
+# MSPE_GRU <- 1/dim(y_val)[1] * sum((y_hat - y_val[, 1])^2)
+# MAE_GRU <- 1/dim(y_val)[1] * sum(abs(y_hat - y_val[, 1]))
+# cat("MSFE for GRU =", MSPE_GRU, "\n")
+# cat("MAE for GRU =", MAE_GRU, "\n")
+```
+
+
+```{r}
+#rm(list=ls(all=TRUE))
+# require(MASS) ## may need install.packages("MASS")
+# 
+# #Load data
+# olympics=read.csv("olympics100m.csv",header=T)
+# 
+# ## Set the kernel parameters
+# gamma = 0.01
+# alpha = 0.2
+# sigma_sq=0.1
+# 
+# training=seq(1,27,2)
+# test=seq(2,26,2)
+# 
+# ## Define x
+# # Set x to be the year of the olympic games
+# x = olympics$year[training]
+# N = length(x)
+# # Set y to be the best 100m time.
+# y = olympics$time[training]
+# #Subtract the sample mean so the times have sample mean 0
+# m = mean(y)
+# y = y-m
+# 
+# ## Create the training covariance matrix
+# C = matrix(0,ncol=N,nrow=N)
+# C = alpha*exp(-gamma*(matrix(rep(x,N),ncol=N) - matrix(rep(x,N),ncol=N,byrow=T))^2)+sigma_sq*diag(N)
+# 
+# ## Define the test points - again on a uniform grid
+# #testx = matrix(c(2012,2016),nrow=1)
+# testx = olympics$year[test]
+# Ntest = length(testx)
+# 
+# ## Plot the training data and show the position of the test points
+# xl = c(1890,2016)
+# yl = range(c(y+0.25,y-0.25)+m)
+# plot(x,y+m,xlab="x",ylab="f(x)",pch=16,xlim=xl,ylim=yl,col="red")
+# # Draw dashed lines at the test points
+# for(i in testx){
+#   abline(v=i,lty=2)
+# }
+# 
+# ## Compute the test covariance
+# # We need two matrices, $\mathbf{C}^*$ and $\mathbf{R}$
+# Ntest = length(testx)
+# # The train by test matrix
+# R = alpha*exp(-gamma*(matrix(rep(x,Ntest),ncol=Ntest) - matrix(rep(testx,N),nrow=N,byrow=N))^2)
+# # The test by test matrix
+# Cstar = alpha*exp(-gamma*(matrix(rep(testx,Ntest),nrow=Ntest,byrow=T)-matrix(rep(t(testx),Ntest),ncol=Ntest))^2)
+# 
+# ## Compute the mean and covariance of the predictions
+# # Plot the training data
+# plot(x,y+m,xlim=xl,ylim=yl,xlab="x",ylab="f(x)",pch=16,col="red")
+# # Compute the mean and covariance
+# pred_mu = t(R)%*%solve(C)%*%matrix(y,ncol=1)
+# pred_cov = Cstar - t(R)%*%solve(C)%*%R
+# # Extract the standard deviations at the test points (square root of the
+# # diagonal elements of the covariance matrix)
+# pred_sd = sqrt(diag(pred_cov))
+# # Plot the predictions as error bars
+# points(testx,pred_mu+m,pch=16)
+# arrows(testx,pred_mu+m-pred_sd,testx,pred_mu+m+pred_sd, length=0.05, angle=90, code=3,pch=16)
+```
+
+
