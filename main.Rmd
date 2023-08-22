@@ -1,6 +1,5 @@
 ---
 title: "main"
-author: "Rick Holubec"
 date: "`r Sys.Date()`"
 output: pdf_document
 ---
@@ -24,7 +23,7 @@ source("Data-preprocessing.R")
 #X_ts<-cbind(y_lag1,y_lag2,y_lag12, cpi, kilian, delta_stock, prod)
 #X<-as.data.frame(X_ts)
 X_lag1_ts<-cbind(y_lag1, cpi_lag1, kilian_lag1, delta_stock_lag1, prod_lag1)
-X_lag1<-as.data.frame(X_ts)
+X_lag1<-as.data.frame(X_lag1_ts)
 y<-as.vector(y_ts)
 # Plots
 ts.plot(y)
@@ -180,7 +179,7 @@ write.csv(set$y_test, file = "data/Pre-processed data/y_test.csv", row.names = F
 
 # Random Walk
 ```{r}
-step <- 1
+step <- 12
 R <- as.integer(length(set$y_test)/step)
 y_hat_RW <- c()
 T1 <- dim(set$X_train)[1]+dim(set$X_test)[1]
@@ -260,7 +259,7 @@ print(paste("MAPE for ARDL =", MAPE_ARDL))
 
 ```{r}
 library(vars)
-step <- 1
+step <- 12
 Y_ts<-cbind(y_ts,kilian,delta_stock)
 R <- as.integer(length(set$y_test)/step)
 y_hat_VAR <- c()
@@ -374,7 +373,7 @@ df_results
 ```
 
 ```{r}
-dm.test((y_hat_ARMA-as.vector(set$y_test)),(y_hat_FAR-as.vector(set$y_test)),h=1, alternative="greater", power = 1)#Power
+dm.test((y_hat_ARMA-as.vector(set$y_test)),(y_hat_FAR-as.vector(set$y_test)),h=12, alternative="greater", power = 1)#Power
 ```
 
 
@@ -670,62 +669,23 @@ lines(impact_1, col="red")
 
 
 ```{r}
-uncertain_data<-as.data.frame(cbind(time_idx,y_hat_GPR,lower_GPR,upper_GPR,set$y_test))[37:95,]
-ggplot(data =uncertain_data,aes(x = as.Date(time_idx)))+
-  geom_ribbon(aes(ymin = lower_GPR, ymax = upper_GPR), fill = 'grey90') +
-  geom_line(aes(y = set$y_test[37:95]),colour="black")+
-  geom_line(aes(y = y_hat_GPR),colour="blue")+#,colour="red"
-  labs(x = NULL, 
-       y = "WTI",
-       color = NULL
-       ) +
-  theme_minimal()+
-  theme(
-    aspect.ratio = 1
-  )
+# uncertain_data<-as.data.frame(cbind(time_idx,y_hat_GPR,lower_GPR,upper_GPR,set$y_test))[37:95,]
+# ggplot(data =uncertain_data,aes(x = as.Date(time_idx)))+
+#   geom_ribbon(aes(ymin = lower_GPR, ymax = upper_GPR), fill = 'grey90') +
+#   geom_line(aes(y = set$y_test[37:95]),colour="black")+
+#   geom_line(aes(y = y_hat_GPR),colour="blue")+#,colour="red"
+#   labs(x = NULL, 
+#        y = "WTI",
+#        color = NULL
+#        ) +
+#   theme_minimal()+
+#   theme(
+#     aspect.ratio = 1
+#   )
 ```
 
 
-```{r}
-# Fit the model
-library(ggplot2)
-library(plyr)
-library(cmdstanr)
-library(rstan)
-N<-length(set$y_train)
-mod = cmdstan_model("MCMC.stan",include_paths = "~/Documents/LSE/Dissertation/Code/ANOVA-kernel/")
-y_stan<-as.vector(set$y_train)
-X_train<-cbind(y_lag1,kilian_lag1, delta_stock_lag1, cpi_lag1, prod_lag1, y_lag2)
-X_test<-tail(cbind(y_ts,kilian, delta_stock,cpi, prod, y_lag1),1)
-y_train<-y_ts
-data_MCMC<-list(N=240,
-          x1=as.vector(X_train[,1]), #lag1
-          x2=as.vector(X_train[,2]), 
-          x3=as.vector(X_train[,3]), 
-          x4=as.vector(X_train[,4]), 
-          x5=as.vector(X_train[,5]), 
-          x6=as.vector(X_train[,6]), 
-          y=as.vector(y_train),
-          M=1,
-          x_new1=as.matrix(X_test[,1]), 
-          x_new2=as.matrix(X_test[,2]),
-          x_new3=as.matrix(X_test[,3]), 
-          x_new4=as.matrix(X_test[,4]),
-          x_new5=as.matrix(X_test[,5]), 
-          x_new6=as.matrix(X_test[,6])
-          )
-fit = mod$sample(
-  data = data_MCMC, 
-  seed = 123, 
-  iter_warmup = 200,
-  iter_sampling = 300,
-  save_warmup = TRUE,
-  chains = 2, 
-  parallel_chains = 2,
-  refresh = 10
-)
 
-```
 
 
 
