@@ -13,6 +13,27 @@
 - 3D samples.R: plot draws from a multivariate normal distribution in 3D, mainly used as debug file for Kernels.R 
 - GPR.R: provides multiple kernel functions, mainly used as a debug file for MCMC.stan
 
+**Models**
+
+*Linear Time Series models*
+- RW
+- ARMA(p,q)
+- ARDL
+- VAR(p)
+
+*Time-varying coefficient models*
+- tvAR
+- tvVAR
+- FAR
+
+*Neural Networks*
+
+- feed-forward neural network
+- LSTM
+
+*Gaussian Process Regression*
+- ANOVA kernels
+
 **Data**
 
 Currently contains the Crude Oil Prices: West Texas Intermediate (WTI) - Cushing, Oklahoma MCOILWTICO series from the Federal Reserve Economic Research (FRED) database. The original time series starts in January 1986 and can be derived from https://fred.stlouisfed.org/series/MCOILWTICO. The explanatory variables are the consumer price index (FRED), Kilian index (FED Dallas), global production (JODI-Oil) and stock change (JODI-Oil).
